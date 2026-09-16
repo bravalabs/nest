@@ -414,6 +414,23 @@ describe('ClientRMQ', function () {
       await client.close();
       expect(clientCloseSpy).toHaveBeenCalled();
     });
+
+    it('should fail pending requests with a connection closed error', async () => {
+      const callback = vi.fn();
+      untypedClient.responseEmitter = new EventEmitter();
+      const teardown = untypedClient.publish(
+        { pattern: 'pattern', data: 'data' },
+        callback,
+      );
+
+      await client.close();
+
+      expect(callback).toHaveBeenCalledWith({
+        err: expect.objectContaining({ message: 'Connection closed' }),
+      });
+      // The teardown a caller runs on unsubscribe stays safe afterwards.
+      expect(() => teardown()).not.toThrow();
+    });
   });
   describe('dispatchEvent', () => {
     let msg: ReadPacket;
