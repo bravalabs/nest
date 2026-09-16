@@ -399,6 +399,9 @@ describe('ClientRMQ', function () {
     let channelCloseSpy: ReturnType<typeof vi.fn>;
     let clientCloseSpy: ReturnType<typeof vi.fn>;
     beforeEach(() => {
+      client = new ClientRMQ({});
+      untypedClient = client as any;
+
       channelCloseSpy = vi.fn();
       clientCloseSpy = vi.fn();
       untypedClient.channel = { close: channelCloseSpy };
@@ -418,6 +421,7 @@ describe('ClientRMQ', function () {
     it('should fail pending requests with a connection closed error', async () => {
       const callback = vi.fn();
       untypedClient.responseEmitter = new EventEmitter();
+      untypedClient.channel.sendToQueue = vi.fn(() => ({ catch: vi.fn() }));
       const teardown = untypedClient.publish(
         { pattern: 'pattern', data: 'data' },
         callback,
