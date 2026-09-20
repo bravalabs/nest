@@ -198,6 +198,38 @@ describe('ClientMqtt', () => {
         );
       });
     });
+
+    describe('when publishing throws', () => {
+      beforeEach(() => {
+        publishSpy.mockImplementation(() => {
+          throw new Error('Send error');
+        });
+      });
+
+      it('should undo what the request had already set up', () => {
+        client['publish'](msg, vi.fn());
+
+        expect(client['routingMap'].size).toBe(0);
+        expect(unsubscribeSpy).toHaveBeenCalled();
+      });
+
+      it('should undo it as well when the subscription is acknowledged later', () => {
+        let acknowledge = () => {};
+        subscribeSpy.mockImplementation((_channel, done) => {
+          acknowledge = () => done();
+        });
+        const callback = vi.fn();
+
+        client['publish'](msg, callback);
+        acknowledge();
+
+        expect(client['routingMap'].size).toBe(0);
+        expect(unsubscribeSpy).toHaveBeenCalled();
+        expect(callback).toHaveBeenCalledWith({
+          err: expect.objectContaining({ message: 'Send error' }),
+        });
+      });
+    });
   });
   describe('createResponseCallback', () => {
     let callback: ReturnType<typeof vi.fn>, subscription;

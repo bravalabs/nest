@@ -248,6 +248,7 @@ export class ClientMqtt extends ClientProxy<MqttEvents, MqttStatus> {
     partialPacket: ReadPacket,
     callback: (packet: WritePacket) => any,
   ): () => void {
+    let cleanup = () => {};
     try {
       const packet = this.assignPacketId(partialPacket);
       const pattern = this.normalizePattern(partialPacket.pattern);
@@ -262,24 +263,41 @@ export class ClientMqtt extends ClientProxy<MqttEvents, MqttStatus> {
         if (isTornDown) {
           return;
         }
-        isPublished = true;
         subscriptionsCount = this.subscriptionsCount.get(responseChannel) || 0;
         this.subscriptionsCount.set(responseChannel, subscriptionsCount + 1);
         this.routingMap.set(packet.id, callback);
+        isPublished = true;
 
-        const options =
-          isObject(packet?.data) && packet.data instanceof MqttRecord
-            ? packet.data.options
-            : undefined;
-        delete packet?.data?.options;
-        const serializedPacket: string | Buffer =
-          this.serializer.serialize(packet);
+        try {
+          const options =
+            isObject(packet?.data) && packet.data instanceof MqttRecord
+              ? packet.data.options
+              : undefined;
+          delete packet?.data?.options;
+          const serializedPacket: string | Buffer =
+            this.serializer.serialize(packet);
 
-        this.mqttClient!.publish(
-          this.getRequestPattern(pattern),
-          serializedPacket,
-          this.mergePacketOptions(options),
-        );
+          this.mqttClient!.publish(
+            this.getRequestPattern(pattern),
+            serializedPacket,
+            this.mergePacketOptions(options),
+          );
+        } catch (err) {
+          // The broker can acknowledge the subscription later, so this runs
+          // outside the outer catch and has to undo its own work.
+          cleanup();
+          callback({ err });
+        }
+      };
+
+      cleanup = () => {
+        isTornDown = true;
+        if (!isPublished) {
+          return;
+        }
+        isPublished = false;
+        this.unsubscribeFromChannel(responseChannel);
+        this.routingMap.delete(packet.id);
       };
 
       if (subscriptionsCount <= 0) {
@@ -290,15 +308,9 @@ export class ClientMqtt extends ClientProxy<MqttEvents, MqttStatus> {
         publishPacket();
       }
 
-      return () => {
-        isTornDown = true;
-        if (!isPublished) {
-          return;
-        }
-        this.unsubscribeFromChannel(responseChannel);
-        this.routingMap.delete(packet.id);
-      };
+      return cleanup;
     } catch (err) {
+      cleanup();
       callback({ err });
       return () => {};
     }

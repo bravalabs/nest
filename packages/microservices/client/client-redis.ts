@@ -290,6 +290,7 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
     partialPacket: ReadPacket,
     callback: (packet: WritePacket) => any,
   ): () => void {
+    let cleanup = () => {};
     try {
       const packet = this.assignPacketId(partialPacket);
       const pattern = this.normalizePattern(partialPacket.pattern);
@@ -304,14 +305,32 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
         if (isTornDown) {
           return;
         }
-        isPublished = true;
         subscriptionsCount = this.subscriptionsCount.get(responseChannel) || 0;
         this.subscriptionsCount.set(responseChannel, subscriptionsCount + 1);
         this.routingMap.set(packet.id, callback);
-        this.pubClient.publish(
-          this.getRequestPattern(pattern),
-          JSON.stringify(serializedPacket),
-        );
+        isPublished = true;
+
+        try {
+          this.pubClient.publish(
+            this.getRequestPattern(pattern),
+            JSON.stringify(serializedPacket),
+          );
+        } catch (err) {
+          // The broker can acknowledge the subscription later, so this runs
+          // outside the outer catch and has to undo its own work.
+          cleanup();
+          callback({ err });
+        }
+      };
+
+      cleanup = () => {
+        isTornDown = true;
+        if (!isPublished) {
+          return;
+        }
+        isPublished = false;
+        this.unsubscribeFromChannel(responseChannel);
+        this.routingMap.delete(packet.id);
       };
 
       if (subscriptionsCount <= 0) {
@@ -322,15 +341,9 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
         publishPacket();
       }
 
-      return () => {
-        isTornDown = true;
-        if (!isPublished) {
-          return;
-        }
-        this.unsubscribeFromChannel(responseChannel);
-        this.routingMap.delete(packet.id);
-      };
+      return cleanup;
     } catch (err) {
+      cleanup();
       callback({ err });
       return () => {};
     }
