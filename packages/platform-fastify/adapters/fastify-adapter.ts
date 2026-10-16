@@ -905,32 +905,52 @@ export class FastifyAdapter<
     return reply.sent || reply.raw.headersSent;
   }
 
-  public getHeader(response: any, name: string) {
+  public getHeader(response: TRawResponse | TReply, name: string) {
     return response.getHeader(name);
   }
 
-  public setHeader(response: TReply, name: string, value: string) {
-    return response.header(name, value);
+  public setHeader(
+    response: TRawResponse | TReply,
+    name: string,
+    value: string,
+  ) {
+    if (this.isNativeResponse(response)) {
+      return response.setHeader(name, value);
+    }
+    const reply: TReply = response;
+    return reply.header(name, value);
   }
 
-  public appendHeader(response: any, name: string, value: string) {
+  public appendHeader(
+    response: TRawResponse | TReply,
+    name: string,
+    value: string,
+  ) {
+    if (this.isNativeResponse(response)) {
+      const current = response.getHeader(name);
+      return response.setHeader(
+        name,
+        current === undefined ? value : [current, value].flat().map(String),
+      );
+    }
+    const reply: TReply = response;
     // Fastify Reply.header() already concatenates set-cookie values. A value
     // that is still on the raw response (e.g., set by a middleware) would be
     // replaced when the reply writes its headers, so it is moved first.
     if (String(name).toLowerCase() === 'set-cookie') {
-      const rawValue = response.raw.getHeader(name);
+      const rawValue = reply.raw.getHeader(name);
       if (rawValue !== undefined) {
-        response.raw.removeHeader(name);
-        response.header(name, rawValue);
+        reply.raw.removeHeader(name);
+        reply.header(name, rawValue);
       }
-      return response.header(name, value);
+      return reply.header(name, value);
     }
-    const current = response.getHeader(name);
+    const current = reply.getHeader(name);
     if (current === undefined) {
-      return response.header(name, value);
+      return reply.header(name, value);
     }
     const values = Array.isArray(current) ? current : [current];
-    return response.header(name, values.concat(value));
+    return reply.header(name, values.concat(value));
   }
 
   public getRequestHostname(request: TRequest): string {
