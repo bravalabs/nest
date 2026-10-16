@@ -914,13 +914,19 @@ export class FastifyAdapter<
   }
 
   public appendHeader(response: any, name: string, value: string) {
-    const current = response.getHeader(name);
-    if (current === undefined) {
+    // Fastify Reply.header() already concatenates set-cookie values. A value
+    // that is still on the raw response (e.g., set by a middleware) would be
+    // replaced when the reply writes its headers, so it is moved first.
+    if (String(name).toLowerCase() === 'set-cookie') {
+      const rawValue = response.raw.getHeader(name);
+      if (rawValue !== undefined) {
+        response.raw.removeHeader(name);
+        response.header(name, rawValue);
+      }
       return response.header(name, value);
     }
-    // Fastify Reply.header() already concatenates set-cookie.
-    // Re-passing the accumulated list would duplicate previous cookies.
-    if (String(name).toLowerCase() === 'set-cookie') {
+    const current = response.getHeader(name);
+    if (current === undefined) {
       return response.header(name, value);
     }
     const values = Array.isArray(current) ? current : [current];
